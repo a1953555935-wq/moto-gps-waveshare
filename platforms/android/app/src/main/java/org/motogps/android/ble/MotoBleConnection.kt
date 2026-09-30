@@ -1,5 +1,7 @@
 package org.motogps.android.ble
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
@@ -8,6 +10,7 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +20,7 @@ import java.util.ArrayDeque
 import java.util.UUID
 
 /** Owns one foreground BLE link. Every GATT operation and codec call runs on the main thread. */
+@SuppressLint("MissingPermission") // connect() checks runtime permission; revocation is handled below.
 class MotoBleConnection(
     private val context: Context,
     private val report: (String) -> Unit,
@@ -82,7 +86,9 @@ class MotoBleConnection(
                     phase = Phase.MTU
                     report("蓝牙已连接，正在协商传输大小")
                     armTimeout()
-                    if (!link.requestMtu(517)) discover(link, 23)
+                    try {
+                        if (!link.requestMtu(517)) discover(link, 23)
+                    } catch (_: SecurityException) { fail("蓝牙连接权限已被撤销") }
                 }
             }
         }
@@ -182,6 +188,11 @@ class MotoBleConnection(
 
     fun connect(device: BluetoothDevice) {
         close()
+        if (Build.VERSION.SDK_INT >= 31 &&
+            context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            report("需要蓝牙连接权限")
+            return
+        }
         phase = Phase.CONNECTING
         report("正在连接圆屏…")
         try {
@@ -198,7 +209,9 @@ class MotoBleConnection(
         phase = Phase.SERVICES
         report("正在查找圆屏导航服务")
         armTimeout()
-        if (!link.discoverServices()) fail("无法查找圆屏服务")
+        try {
+            if (!link.discoverServices()) fail("无法查找圆屏服务")
+        } catch (_: SecurityException) { fail("蓝牙连接权限已被撤销") }
     }
 
     private fun sendHandshake(ready: Boolean) {
@@ -253,15 +266,17 @@ class MotoBleConnection(
         val frame = writes.removeFirst()
         writePending = true
         characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        val accepted = if (Build.VERSION.SDK_INT >= 33) {
-            link.writeCharacteristic(characteristic, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
-                BluetoothStatusCodes.SUCCESS
-        } else {
-            @Suppress("DEPRECATION")
-            characteristic.value = frame
-            @Suppress("DEPRECATION")
-            link.writeCharacteristic(characteristic)
-        }
+        val accepted = try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                link.writeCharacteristic(characteristic, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
+                    BluetoothStatusCodes.SUCCESS
+            } else {
+                @Suppress("DEPRECATION")
+                characteristic.value = frame
+                @Suppress("DEPRECATION")
+                link.writeCharacteristic(characteristic)
+            }
+        } catch (_: SecurityException) { false }
         if (!accepted) fail("蓝牙写入队列启动失败")
     }
 
