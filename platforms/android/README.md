@@ -6,6 +6,8 @@
 
 使用 Android Studio 打开 `platforms/android/`，安装 Android SDK 36 和 JDK 17，完成 Gradle 同步后运行 `app` 到支持 BLE 的 Android 8.0 及以上真机。也可在该目录执行 `gradlew.bat :app:assembleDebug`。工程使用 AGP 8.13.2、Gradle 8.13、Kotlin 2.2.20 和 Compose BOM 2025.12.00。当前本机没有 Android SDK/JDK，构建由 GitHub Actions 检查，真机运行尚未验证。
 
+开发分支的 Android Actions 成功运行后会保存 `moto-gps-android-debug` 测试 APK 作为短期构建产物。这是临时 debug 签名版本，不是正式发布包。
+
 Android 12 及以上扫描时请求附近设备权限；旧系统需要精确位置权限。导航定位权限在后续真实导航阶段单独请求。扫描仅持续十秒；进入后台超过 30 秒会关闭当前连接，留出完成系统配对提示的时间。BLE 服务 UUID 来自 `shared/ble_protocol`，协议编码、CRC、分片和重组复用共享 C++ 实现。通知订阅使用固件要求的加密 CCCD 写入；首次配对是否能在目标手机上顺利触发，仍需真机验证。
 
 后续需要处理应用 ACK、设备命令、导航状态、重连与前台服务，再接入网关。高德 Web 服务 Key 留在服务端。
