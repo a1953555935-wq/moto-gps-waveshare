@@ -39,8 +39,15 @@ class MotoBleConnection(
     private var sessionStartMs = 0L
     private var heartbeatIntervalMs = 1000L
     private var writePending = false
+    private var foreground = true
     private val writes = ArrayDeque<ByteArray>()
     private var handshakeAttempts = 0
+    private val backgroundClose = Runnable {
+        if (!foreground && phase != Phase.CLOSED) {
+            close()
+            report("已进入后台，圆屏连接已关闭")
+        }
+    }
 
     private val timeout = Runnable {
         when (phase) {
@@ -119,23 +126,25 @@ class MotoBleConnection(
                     return@post
                 }
                 rx = outbound
-                if (!link.setCharacteristicNotification(inbound, true)) {
-                    fail("无法订阅圆屏通知")
-                    return@post
-                }
-                phase = Phase.SUBSCRIBING
-                report("正在订阅加密通知；如出现系统配对提示，请完成配对")
-                armTimeout(20_000)
-                val accepted = if (Build.VERSION.SDK_INT >= 33) {
-                    link.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ==
-                        BluetoothStatusCodes.SUCCESS
-                } else {
-                    @Suppress("DEPRECATION")
-                    descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    @Suppress("DEPRECATION")
-                    link.writeDescriptor(descriptor)
-                }
-                if (!accepted) fail("无法写入圆屏通知订阅")
+                try {
+                    if (!link.setCharacteristicNotification(inbound, true)) {
+                        fail("无法订阅圆屏通知")
+                        return@post
+                    }
+                    phase = Phase.SUBSCRIBING
+                    report("正在订阅加密通知；如出现系统配对提示，请完成配对")
+                    armTimeout(20_000)
+                    val accepted = if (Build.VERSION.SDK_INT >= 33) {
+                        link.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ==
+                            BluetoothStatusCodes.SUCCESS
+                    } else {
+                        @Suppress("DEPRECATION")
+                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        @Suppress("DEPRECATION")
+                        link.writeDescriptor(descriptor)
+                    }
+                    if (!accepted) fail("无法写入圆屏通知订阅")
+                } catch (_: SecurityException) { fail("蓝牙连接权限已被撤销") }
             }
         }
 
@@ -290,10 +299,18 @@ class MotoBleConnection(
         report(reason)
     }
 
+    /** Allow the system pairing dialog to cover the Activity briefly. */
+    fun setForeground(active: Boolean) {
+        foreground = active
+        main.removeCallbacks(backgroundClose)
+        if (!active) main.postDelayed(backgroundClose, 30_000)
+    }
+
     override fun close() {
         phase = Phase.CLOSED
         main.removeCallbacks(timeout)
         main.removeCallbacks(heartbeat)
+        main.removeCallbacks(backgroundClose)
         writes.clear()
         writePending = false
         rx = null

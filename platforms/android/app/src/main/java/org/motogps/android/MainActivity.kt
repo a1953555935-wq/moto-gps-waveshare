@@ -133,9 +133,19 @@ class MainActivity : ComponentActivity() {
         if (discovered.isEmpty()) status = "没有发现圆屏，请检查设备已开机并靠近手机"
     }
 
+    override fun onStart() {
+        super.onStart()
+        connection.setForeground(true)
+    }
+
     override fun onStop() {
         stopScan()
-        connection.close() // Background navigation needs a separate foreground-service phase.
+        connection.setForeground(false)
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        connection.close()
+        super.onDestroy()
     }
 }
